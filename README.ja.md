@@ -30,7 +30,7 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 
 専用の実行画面、作品のテスト、その結果を表示する。「すべて実行」と各テストの「実行」で始め、「止める」で止める。失敗した確かめるブロックは、比べた値を示し、「ブロックを表示」でエディターにそのブロックを表示するようホストに頼む。時間切れや動かせなかったテストは、その理由を示す。開いた時点でテストを一覧にし、テスト用の VM は実行を始めるときに作る。文言は `locale` に従い、日本語か英語にする。
 
-ホストは、実行を始めるときに編集中の作品の写しを返す `getProject()`、テストを動かすものを作って実行画面を `stage` に置く `createRunner(stage)`、任意で `showBlock(target, blockId)` を渡す。同じページに使える VM があるホストは、代わりに `createVm(stage)` を渡せる。
+ホストは、実行を始めるときに編集中の作品の写しを返す `getProject()`、テストを動かすものを作って実行画面を `stage` に置く `createRunner(stage)`、任意で `showBlock(target, blockId)` を渡す。`getProject()` が SB3 のアーカイブを返すときは、画面はそれを読めないので、その `project.json` を返す `listProject()` も渡す。渡せば実行前にテストを一覧にし、渡さなければ最初の実行で動いた順に一覧にする。同じページに使える VM があるホストは、代わりに `createVm(stage)` を渡せる。
 
 ## 別の文書でテストを動かす
 

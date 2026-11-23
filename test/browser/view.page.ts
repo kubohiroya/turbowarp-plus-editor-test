@@ -4,7 +4,8 @@ import {extension, project} from './fixture.ts';
 
 declare const EditorRuntime: any;
 
-(globalThis as any).setup = async ({locale, frameLimit}: {locale: string; frameLimit: number}) => {
+(globalThis as any).setup = async ({locale, frameLimit, archive = false, list = false}:
+    {locale: string; frameLimit: number; archive?: boolean; list?: boolean}) => {
     const host = await EditorRuntime.start(document.getElementById('workspace'), {locale: 'en'});
     const vm = host.vm;
     host.registerExtension(extension(EditorRuntime.vmModules.ScratchCommon.Cast, vm.runtime));
@@ -13,7 +14,9 @@ declare const EditorRuntime: any;
     const created: HTMLElement[] = [];
     const options = {
         document, locale, frameLimit,
-        getProject: () => structuredClone(project),
+        // An archive stands for the SB3 the editor passes, which the view cannot read; only its listing is tested.
+        getProject: () => archive ? new ArrayBuffer(8) : structuredClone(project),
+        ...(list ? {listProject: () => JSON.stringify(project)} : {}),
         createVm: (stage: HTMLElement) => {
             created.push(stage);
             return vm;
