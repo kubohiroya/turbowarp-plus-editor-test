@@ -1,0 +1,49 @@
+{
+  "name": "@kubohiroya/turbowarp-plus-editor-test",
+  "version": "0.1.0",
+  "description": "Runs the tests written inside a TurboWarp Plus Editor project, each from a fresh copy of the project, and collects the results",
+  "type": "module",
+  "license": "MPL-2.0",
+  "author": "Hiroya Kubo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kubohiroya/turbowarp-plus-editor-test.git"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./test-discovery": {
+      "types": "./dist/test-discovery.d.ts",
+      "default": "./dist/test-discovery.js"
+    },
+    "./test-runner": {
+      "types": "./dist/test-runner.d.ts",
+      "default": "./dist/test-runner.js"
+    },
+    "./junit": {
+      "types": "./dist/junit.d.ts",
+      "default": "./dist/junit.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "tsconfig.json",
+    "README.md",
+    "README.ja.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test test/*.test.ts",
+    "test:browser": "npm run build && node --test test/*.browser.ts"
+  },
+  "devDependencies": {
+    "@kubohiroya/turbowarp-plus-editor-test-runtime": "0.3.2",
+    "@playwright/test": "1.64.1",
+    "typescript": "6.0.3"
+  }
+}
