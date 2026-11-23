@@ -16,12 +16,12 @@ after(async () => {
     await server?.close();
 });
 
-const open = async (locale = 'en', frameLimit = 30) => {
+const open = async (locale = 'en', frameLimit = 30, more: {archive?: boolean; list?: boolean} = {}) => {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(server.url);
-    await page.evaluate(options => (globalThis as any).setup(options), {locale, frameLimit});
+    await page.evaluate(options => (globalThis as any).setup(options), {locale, frameLimit, ...more});
     return {page, errors};
 };
 const rows = (page: Page) => page.locator('#view .twpe-test-run__test').evaluateAll(items => items.map(item => [
@@ -101,6 +101,25 @@ test('speaks Japanese, and offers its menu item and workspace tab', async () => 
         reference: {providerId: 'turbowarp-plus', documentId: 'tests'}, title: 'テスト実行画面', transient: true,
         mounted: 1, closed: 1, left: 0
     });
+    assert.deepEqual(errors, []);
+    await page.close();
+});
+
+test('lists the tests from listProject when the project to run is an archive', async () => {
+    const {page, errors} = await open('en', 30, {archive: true, list: true});
+    assert.deepEqual((await rows(page)).map(([address, status]) => [address, status]), [
+        ['Cat/first', 'pending'], ['Cat/second', 'pending'], ['Cat/failing', 'pending'],
+        ['Cat/forever', 'pending'], ['Twice/twiceTest', 'pending']
+    ]);
+    assert.equal(await summary(page).textContent(), '');
+    assert.deepEqual(errors, []);
+    await page.close();
+});
+
+test('says the tests are listed once they run when it cannot read the project', async () => {
+    const {page, errors} = await open('en', 30, {archive: true});
+    assert.deepEqual(await rows(page), []);
+    assert.equal(await summary(page).textContent(), 'The tests are listed once they run.');
     assert.deepEqual(errors, []);
     await page.close();
 });

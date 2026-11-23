@@ -18,6 +18,12 @@ export interface TestRunViewOptions {
      */
     getProject(): Project | Promise<Project>;
     /**
+     * The project's `project.json`, as text or an object, to list the tests from when `getProject` returns an SB3
+     * archive, which the view cannot read. Read when the view opens or refreshes and when a run starts. It must carry
+     * the same block IDs as the project the tests run on.
+     */
+    listProject?(): string | object | Promise<string | object>;
+    /**
      * What runs the tests, created on the first run with the element the stage goes in. In the editor this is a
      * frame running `serveTestFrame` (`connectTestFrame`): only one VM of a page can load extensions.
      */
@@ -198,6 +204,8 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
     root.append(bar, body);
 
     let tests: DiscoveredTest[] = [];
+    // Whether the tests are known: false while the project is an archive the view cannot read, until a run lists them.
+    let listed = true;
     const results = new Map<string, TestResult>();
     let runningAddress: string | null = null;
     let controller: AbortController | null = null;
@@ -223,7 +231,7 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
 
     const render = () => {
         list.replaceChildren();
-        if (tests.length === 0) {
+        if (tests.length === 0 && listed) {
             list.append(make('li', 'twpe-test-run__empty', text.noTests));
         }
         for (const test of tests) {
@@ -276,7 +284,11 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
     };
 
     const listFrom = (project: Project): boolean => {
-        if (project instanceof ArrayBuffer) return false;
+        if (project instanceof ArrayBuffer) {
+            listed = tests.length > 0;
+            return false;
+        }
+        listed = true;
         tests = discoverTests(project).tests;
         // Results of tests that no longer exist would only mislead.
         for (const address of [...results.keys()]) {
@@ -288,7 +300,8 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
     const start = async (only?: string[]) => {
         if (controller || disposed) return;
         const project = await options.getProject();
-        if (!listFrom(project) && tests.length === 0) setSummary(text.cannotList);
+        const known = listFrom(options.listProject ? await options.listProject() : project);
+        if (!known && tests.length === 0) setSummary(text.cannotList);
         controller = new AbortController();
         const signal = controller.signal;
         if (only) for (const address of only) results.delete(address);
@@ -304,6 +317,7 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
             await (await runner).run({
                 project, only, frameLimit: options.frameLimit, signal,
                 onTestStart: test => {
+                    listed = true;
                     if (!tests.some(known => known.address === test.address)) tests.push(test);
                     runningAddress = test.address;
                     render();
@@ -316,6 +330,8 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
             });
             controller = null;
             runningAddress = null;
+            // The run has seen every test there is, even when there were none.
+            if (!only) listed = true;
             render();
             summarize();
         } catch (error) {
@@ -334,10 +350,10 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         element: root,
         async refresh() {
             if (controller) return;
-            const project = await options.getProject();
-            if (!listFrom(project)) setSummary(text.cannotList);
+            const known = listFrom(options.listProject ? await options.listProject() : await options.getProject());
             render();
-            summarize();
+            if (known) summarize();
+            else setSummary(text.cannotList);
         },
         runAll: () => start(),
         run: address => start([address]),

@@ -30,7 +30,7 @@ A test **passed** when its script ended with no failed check, **failed** when a 
 
 The view shows a stage of its own, the project's tests and their results. **Run all** and each test's **Run** button start a run; **Stop** ends it. A failed check shows what it compared, and **Show block** asks the host to show that block in the editor. A test that timed out or could not run shows why. The view lists the tests as soon as it opens, and creates the test VM only when a run starts. Its text is Japanese or English, following `locale`.
 
-The host passes `getProject()`, which returns a copy of the editor's project when a run starts, `createRunner(stage)`, which creates what runs the tests and puts its stage into `stage`, and optionally `showBlock(target, blockId)`. A host that already has a spare VM in the page can pass `createVm(stage)` instead.
+The host passes `getProject()`, which returns a copy of the editor's project when a run starts, `createRunner(stage)`, which creates what runs the tests and puts its stage into `stage`, and optionally `showBlock(target, blockId)`. When `getProject()` returns an SB3 archive, which the view cannot read, pass `listProject()` with its `project.json` too, so that the view lists the tests before they run; otherwise it lists them as the first run starts them. A host that already has a spare VM in the page can pass `createVm(stage)` instead.
 
 ## Running tests in a frame
 
