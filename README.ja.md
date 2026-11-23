@@ -12,6 +12,7 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 | --- | --- |
 | `@kubohiroya/turbowarp-plus-editor-test/test-discovery` | `discoverTests(project)`。`project.json` の中のテストを `<ターゲット>/<ブロックID>` で指し、ターゲットごとの「テストの前に」ハットと、それが2つ以上あるターゲットを返す |
 | `@kubohiroya/turbowarp-plus-editor-test/test-runner` | `runTests({vm, project, only, frameLimit, signal, onTestStart, onTestEnd})`。テストを実行して結果を返す |
+| `@kubohiroya/turbowarp-plus-editor-test/test-run-view` | `createTestRunView(options)`。テスト実行画面（素の DOM）。`testRunMenuItem(locale, open)` はワークベンチの実行画面▼メニュー（`menuItems`）に足す項目、`testRunPanelRequest(options)` はワークベンチの `getDocumentWorkspace(vm).open()` で開く一時的なタブ |
 | `@kubohiroya/turbowarp-plus-editor-test/junit` | `toJUnitXml(report)`。スプライト・ステージごとに suite、テストごとに case |
 | `@kubohiroya/turbowarp-plus-editor-test` | 上のすべてと、拡張との約束の定数 |
 
@@ -23,6 +24,12 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 4. この2つのスクリプトが出した記録を集め、すべてのスレッドを止める。
 
 確かめるブロックが1つも失敗せずにスクリプトが終われば**成功**、失敗があれば**失敗**、フレームを使い切れば**時間切れ**、動かせなければ**エラー**（「テストの前に」が2つある、ブロックが例外を投げた）。緑の旗は押さない。
+
+## テスト実行画面
+
+専用の実行画面、作品のテスト、その結果を表示する。「すべて実行」と各テストの「実行」で始め、「止める」で止める。失敗した確かめるブロックは、比べた値を示し、「ブロックを表示」でエディターにそのブロックを表示するようホストに頼む。時間切れや動かせなかったテストは、その理由を示す。開いた時点でテストを一覧にし、テスト用の VM は実行を始めるときに作る。文言は `locale` に従い、日本語か英語にする。
+
+ホストは、実行を始めるときに編集中の作品の写しを返す `getProject()`、テスト用の VM を作って実行画面を `stage` に描く `createVm(stage)`、任意で `showBlock(target, blockId)` を渡す。
 
 ## ホストが用意するもの
 

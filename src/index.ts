@@ -3,3 +3,4 @@ export * from './protocol.ts';
 export * from './test-discovery.ts';
 export * from './test-runner.ts';
 export * from './junit.ts';
+export * from './test-run-view.ts';
