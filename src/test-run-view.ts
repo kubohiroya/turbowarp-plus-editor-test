@@ -6,9 +6,8 @@
  */
 import type {AssertionRecord} from './protocol.ts';
 import {discoverTests, type DiscoveredTest} from './test-discovery.ts';
-import {DEFAULT_FRAME_LIMIT, runTests, type RunnerVM, type TestResult, type TestStatus} from './test-runner.ts';
-
-type Project = ArrayBuffer | string | object;
+import {DEFAULT_FRAME_LIMIT, type RunnerVM, type TestResult, type TestStatus} from './test-runner.ts';
+import {vmRunner, type Project, type TestRunnerPort} from './test-frame.ts';
 
 export interface TestRunViewOptions {
     document: Document;
@@ -19,10 +18,15 @@ export interface TestRunViewOptions {
      */
     getProject(): Project | Promise<Project>;
     /**
-     * The VM to run tests on, created on the first run. The host draws its stage into `stage` and loads the
+     * What runs the tests, created on the first run with the element the stage goes in. In the editor this is a
+     * frame running `serveTestFrame` (`connectTestFrame`): only one VM of a page can load extensions.
+     */
+    createRunner?(stage: HTMLElement): TestRunnerPort | Promise<TestRunnerPort>;
+    /**
+     * Or a VM of this page to run tests on, created on the first run, which draws its stage into `stage` and has the
      * extensions the project needs, including TurboWarp-Test. It must not be the editor's VM.
      */
-    createVm(stage: HTMLElement): RunnerVM | Promise<RunnerVM>;
+    createVm?(stage: HTMLElement): RunnerVM | Promise<RunnerVM>;
     /** Shows a block of the editor's project, such as a check that failed. Without it no link is offered. */
     showBlock?(target: string, blockId: string): void;
     frameLimit?: number;
@@ -197,7 +201,7 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
     const results = new Map<string, TestResult>();
     let runningAddress: string | null = null;
     let controller: AbortController | null = null;
-    let vm: Promise<RunnerVM> | null = null;
+    let runner: Promise<TestRunnerPort> | null = null;
     let disposed = false;
 
     const checkItem = (test: DiscoveredTest, record: AssertionRecord) => {
@@ -292,9 +296,13 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         render();
         setSummary(text.running);
         try {
-            vm ??= Promise.resolve(options.createVm(stage));
-            await runTests({
-                vm: await vm, project, only, frameLimit: options.frameLimit, signal,
+            runner ??= (async () => {
+                if (options.createRunner) return options.createRunner(stage);
+                if (options.createVm) return vmRunner(await options.createVm(stage));
+                throw new Error('The test run view needs createRunner or createVm.');
+            })();
+            await (await runner).run({
+                project, only, frameLimit: options.frameLimit, signal,
                 onTestStart: test => {
                     if (!tests.some(known => known.address === test.address)) tests.push(test);
                     runningAddress = test.address;
@@ -339,6 +347,7 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         dispose() {
             disposed = true;
             controller?.abort();
+            void runner?.then(port => port.dispose?.(), () => undefined);
             root.remove();
         }
     };
