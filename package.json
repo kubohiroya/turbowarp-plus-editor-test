@@ -29,6 +29,10 @@
     "./test-run-view": {
       "types": "./dist/test-run-view.d.ts",
       "default": "./dist/test-run-view.js"
+    },
+    "./test-frame": {
+      "types": "./dist/test-frame.d.ts",
+      "default": "./dist/test-frame.js"
     }
   },
   "files": [

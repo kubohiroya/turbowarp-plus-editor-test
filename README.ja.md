@@ -13,6 +13,7 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 | `@kubohiroya/turbowarp-plus-editor-test/test-discovery` | `discoverTests(project)`。`project.json` の中のテストを `<ターゲット>/<ブロックID>` で指し、ターゲットごとの「テストの前に」ハットと、それが2つ以上あるターゲットを返す |
 | `@kubohiroya/turbowarp-plus-editor-test/test-runner` | `runTests({vm, project, only, frameLimit, signal, onTestStart, onTestEnd})`。テストを実行して結果を返す |
 | `@kubohiroya/turbowarp-plus-editor-test/test-run-view` | `createTestRunView(options)`。テスト実行画面（素の DOM）。`testRunMenuItem(locale, open)` はワークベンチの実行画面▼メニュー（`menuItems`）に足す項目、`testRunPanelRequest(options)` はワークベンチの `getDocumentWorkspace(vm).open()` で開く一時的なタブ |
+| `@kubohiroya/turbowarp-plus-editor-test/test-frame` | テストを別の文書（iframe）で動かす。枠の中の `serveTestFrame(options)`、エディター側の `connectTestFrame(frame, options)`、同じページの VM で動かす `vmRunner(vm)` |
 | `@kubohiroya/turbowarp-plus-editor-test/junit` | `toJUnitXml(report)`。スプライト・ステージごとに suite、テストごとに case |
 | `@kubohiroya/turbowarp-plus-editor-test` | 上のすべてと、拡張との約束の定数 |
 
@@ -29,7 +30,11 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 
 専用の実行画面、作品のテスト、その結果を表示する。「すべて実行」と各テストの「実行」で始め、「止める」で止める。失敗した確かめるブロックは、比べた値を示し、「ブロックを表示」でエディターにそのブロックを表示するようホストに頼む。時間切れや動かせなかったテストは、その理由を示す。開いた時点でテストを一覧にし、テスト用の VM は実行を始めるときに作る。文言は `locale` に従い、日本語か英語にする。
 
-ホストは、実行を始めるときに編集中の作品の写しを返す `getProject()`、テスト用の VM を作って実行画面を `stage` に描く `createVm(stage)`、任意で `showBlock(target, blockId)` を渡す。
+ホストは、実行を始めるときに編集中の作品の写しを返す `getProject()`、テストを動かすものを作って実行画面を `stage` に置く `createRunner(stage)`、任意で `showBlock(target, blockId)` を渡す。同じページに使える VM があるホストは、代わりに `createVm(stage)` を渡せる。
+
+## 別の文書でテストを動かす
+
+拡張ローダーはページ全体の central dispatch を自分の VM のために使うので、1つのページで拡張を読み込める VM は1つだけで、エディターではそれがエディターの VM になる。そこでエディターは、テストを別の文書（iframe）で動かす。枠の中では VM と拡張ホストを作って `serveTestFrame({window, origin, getVm, prepare})` を呼び、エディターは枠を画面の `stage` に置いて、`connectTestFrame(frame, {origin, context})` をランナーとして渡す。実行のたびに作品・選んだテスト・`context()`（エディターが読み込んでいる拡張コードの SHA-256 など）を送り、枠の `prepare(context, vm)` が実行前にそれを適用するので、枠はそのコードだけを動かす。どちらの側も、ほかの窓や origin からのメッセージは無視する。
 
 ## ホストが用意するもの
 
