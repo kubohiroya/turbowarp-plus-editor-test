@@ -46,6 +46,8 @@ test('runs every test from a fresh copy, after its target\'s "before each test"'
         [['failingCheck', 'failing', false]]);
     assert.equal(report.results[3].frames, 20);
     assert.match(report.results[4].message, /more than one "before each test"/);
+    assert.deepEqual(report.results.map((result: any) => result.reason ?? null),
+        [null, null, null, 'timed-out', 'duplicate-setups']);
     assert.deepEqual(errors, []);
 });
 

@@ -40,14 +40,18 @@ export interface RunnerVM {
 
 export type TestStatus = 'passed' | 'failed' | 'timed-out' | 'error';
 
+/** Why a test timed out or could not run, for a view to put in its own words. */
+export type TestFailureReason = 'duplicate-setups' | 'missing-target' | 'setup-timed-out' | 'timed-out' | 'exception';
+
 export interface TestResult extends DiscoveredTest {
     status: TestStatus;
     /** Frames the test itself ran, after its "before each test" hat. */
     frames: number;
     /** Every check the test and its "before each test" hat made, in order. */
     assertions: AssertionRecord[];
-    /** Why the test timed out or could not run. */
+    /** Why the test timed out or could not run, in English, as JUnit XML carries it. */
     message?: string;
+    reason?: TestFailureReason;
     durationMs: number;
 }
 
@@ -117,17 +121,18 @@ async function runOne(vm: RunnerVM, options: RunTestsOptions, test: DiscoveredTe
     setups: Record<string, string>, duplicateSetups: Record<string, string[]>): Promise<TestResult> {
     const started = performance.now();
     const assertions: AssertionRecord[] = [];
-    const finish = (status: TestStatus, frames: number, message?: string): TestResult => ({
-        ...test, status, frames, assertions, ...(message ? {message} : {}), durationMs: performance.now() - started
+    const finish = (status: TestStatus, frames: number, reason?: TestFailureReason, message?: string): TestResult => ({
+        ...test, status, frames, assertions, ...(reason ? {reason} : {}), ...(message ? {message} : {}),
+        durationMs: performance.now() - started
     });
     if (duplicateSetups[test.target]) {
-        return finish('error', 0, `${test.target} has more than one "before each test" hat.`);
+        return finish('error', 0, 'duplicate-setups', `${test.target} has more than one "before each test" hat.`);
     }
     const frameLimit = options.frameLimit ?? DEFAULT_FRAME_LIMIT;
     await vm.loadProject(copyOf(options.project));
     vm.setCompilerOptions({enabled: false});
     const target = findTarget(vm, test.target);
-    if (!target) return finish('error', 0, `No sprite or stage named ${test.target}.`);
+    if (!target) return finish('error', 0, 'missing-target', `No sprite or stage named ${test.target}.`);
     const setup = setups[test.target];
     const scripts = new Set([test.blockId, ...(setup ? [setup] : [])]);
     const listener = (record: AssertionRecord) => {
@@ -137,18 +142,20 @@ async function runOne(vm: RunnerVM, options: RunTestsOptions, test: DiscoveredTe
     try {
         if (setup) {
             const setupFrames = await runScript(vm, setup, target, frameLimit, options.signal);
-            if (setupFrames === null) return finish('timed-out', 0, `"before each test" ran for ${frameLimit} frames.`);
+            if (setupFrames === null) {
+                return finish('timed-out', 0, 'setup-timed-out', `"before each test" ran for ${frameLimit} frames.`);
+            }
             if (assertions.some(record => !record.passed)) return finish('failed', 0);
         }
         const frames = await runScript(vm, test.blockId, target, frameLimit, options.signal);
         if (frames === null) {
-            return finish(assertions.some(record => !record.passed) ? 'failed' : 'timed-out', frameLimit,
+            return finish(assertions.some(record => !record.passed) ? 'failed' : 'timed-out', frameLimit, 'timed-out',
                 `The test ran for ${frameLimit} frames.`);
         }
         return finish(assertions.some(record => !record.passed) ? 'failed' : 'passed', frames);
     } catch (error) {
         if (options.signal?.aborted) throw error;
-        return finish('error', 0, error instanceof Error ? error.message : String(error));
+        return finish('error', 0, 'exception', error instanceof Error ? error.message : String(error));
     } finally {
         vm.runtime.removeListener(ASSERTION_EVENT, listener);
         vm.runtime.stopAll();

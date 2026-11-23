@@ -25,6 +25,10 @@
     "./junit": {
       "types": "./dist/junit.d.ts",
       "default": "./dist/junit.js"
+    },
+    "./test-run-view": {
+      "types": "./dist/test-run-view.d.ts",
+      "default": "./dist/test-run-view.js"
     }
   },
   "files": [
