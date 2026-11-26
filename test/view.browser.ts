@@ -16,7 +16,7 @@ after(async () => {
     await server?.close();
 });
 
-const open = async (locale = 'en', frameLimit = 30, more: {archive?: boolean; list?: boolean} = {}) => {
+const open = async (locale = 'en', frameLimit = 30, more: {archive?: boolean; list?: boolean; builds?: boolean} = {}) => {
     const page = await browser.newPage();
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -120,6 +120,21 @@ test('says the tests are listed once they run when it cannot read the project', 
     const {page, errors} = await open('en', 30, {archive: true});
     assert.deepEqual(await rows(page), []);
     assert.equal(await summary(page).textContent(), 'The tests are listed once they run.');
+    assert.deepEqual(errors, []);
+    await page.close();
+});
+
+test('the view labels previous results with their captured build after a different test uses an update', async () => {
+    const {page, errors} = await open('en', 30, {builds: true});
+    await page.getByRole('button', {name: 'Run all', exact: true}).click();
+    await summary(page).filter({hasText: '5 tests'}).waitFor();
+    await page.evaluate(() => (globalThis as any).harness.changeDigest());
+    await page.getByRole('button', {name: 'Run: second visit'}).click();
+    await summary(page).filter({hasText: '5 tests'}).waitFor();
+    const builds = (address: string) => page.locator(`[data-address="${address}"]`)
+        .getByRole('list', {name: 'Tested builds'}).locator('code').textContent();
+    assert.equal(await builds('Cat/first'), 'a'.repeat(64));
+    assert.equal(await builds('Cat/second'), 'b'.repeat(64));
     assert.deepEqual(errors, []);
     await page.close();
 });

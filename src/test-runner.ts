@@ -6,7 +6,7 @@
  *
  * The VM must be one the runner drives alone: not the editor's, and with its frame loop stopped.
  */
-import {ASSERTION_EVENT, type AssertionRecord} from './protocol.ts';
+import {ASSERTION_EVENT, captureTestBuilds, type AssertionRecord, type TestBuildIdentity} from './protocol.ts';
 import {discoverTests, type DiscoveredTest} from './test-discovery.ts';
 
 export interface RunnerTarget {
@@ -53,10 +53,13 @@ export interface TestResult extends DiscoveredTest {
     message?: string;
     reason?: TestFailureReason;
     durationMs: number;
+    /** Host-attributed executable artifacts of this snapshot, not the currently loaded build. */
+    builds?: readonly TestBuildIdentity[];
 }
 
 export interface TestRunReport {
     results: TestResult[];
+    builds?: readonly TestBuildIdentity[];
     counts: Record<TestStatus, number>;
     /** Whether every test that ran passed. */
     ok: boolean;
@@ -70,6 +73,10 @@ export interface RunTestsOptions {
      * storage to the test VM, so that the block IDs match and the assets load without a download.
      */
     project: ArrayBuffer | string | object;
+    /** From the same snapshot as project. This is attribution, never a grant to load an extension. */
+    builds?: readonly TestBuildIdentity[];
+    /** Read actual VM build identities after each test snapshot loads; authoritative when available. */
+    getLoadedBuilds?(vm: RunnerVM): readonly TestBuildIdentity[] | undefined | Promise<readonly TestBuildIdentity[] | undefined>;
     /** Addresses (`<target>/<block ID>`) of the tests to run. All tests run when omitted. */
     only?: readonly string[];
     /** Frames a test, or a "before each test" hat, may run before it counts as timed out. */
@@ -121,15 +128,19 @@ async function runOne(vm: RunnerVM, options: RunTestsOptions, test: DiscoveredTe
     setups: Record<string, string>, duplicateSetups: Record<string, string[]>): Promise<TestResult> {
     const started = performance.now();
     const assertions: AssertionRecord[] = [];
+    let builds = options.getLoadedBuilds ? undefined : options.builds;
     const finish = (status: TestStatus, frames: number, reason?: TestFailureReason, message?: string): TestResult => ({
         ...test, status, frames, assertions, ...(reason ? {reason} : {}), ...(message ? {message} : {}),
-        durationMs: performance.now() - started
+        durationMs: performance.now() - started,
+        ...(builds === undefined ? {} : {builds})
     });
     if (duplicateSetups[test.target]) {
         return finish('error', 0, 'duplicate-setups', `${test.target} has more than one "before each test" hat.`);
     }
     const frameLimit = options.frameLimit ?? DEFAULT_FRAME_LIMIT;
     await vm.loadProject(copyOf(options.project));
+    if (options.getLoadedBuilds) builds = captureTestBuilds(await options.getLoadedBuilds(vm));
+    options.signal?.throwIfAborted();
     vm.setCompilerOptions({enabled: false});
     const target = findTarget(vm, test.target);
     if (!target) return finish('error', 0, 'missing-target', `No sprite or stage named ${test.target}.`);
@@ -163,6 +174,9 @@ async function runOne(vm: RunnerVM, options: RunTestsOptions, test: DiscoveredTe
 }
 
 export async function runTests(options: RunTestsOptions): Promise<TestRunReport> {
+    const builds = options.getLoadedBuilds ? undefined : captureTestBuilds(options.builds);
+    const project = copyOf(options.project);
+    options = {...options, project, builds};
     const {vm} = options;
     if (vm.runtime.frameLoop?.running) {
         throw new Error('The test VM must not run its frame loop; the runner steps it.');
@@ -186,5 +200,10 @@ export async function runTests(options: RunTestsOptions): Promise<TestRunReport>
     }
     const counts: Record<TestStatus, number> = {passed: 0, failed: 0, 'timed-out': 0, error: 0};
     for (const result of results) counts[result.status]++;
-    return {results, counts, ok: results.every(result => result.status === 'passed')};
+    const firstBuilds = results[0]?.builds;
+    const reportBuilds = options.getLoadedBuilds
+        ? (firstBuilds !== undefined && results.every(result => JSON.stringify(result.builds) === JSON.stringify(firstBuilds))
+            ? firstBuilds : undefined)
+        : builds;
+    return {results, counts, ...(reportBuilds === undefined ? {} : {builds: reportBuilds}), ok: results.every(result => result.status === 'passed')};
 }

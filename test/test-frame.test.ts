@@ -97,3 +97,82 @@ test('stopping on the editor side asks the frame to stop and ends the run', asyn
     message(editor, {type: 'twpe-test:failed', id: 'run-1', message: 'aborted', aborted: true}, ORIGIN, contentWindow);
     await assert.rejects(running, {name: 'AbortError'});
 });
+
+test('accepts build attribution by run and keeps earlier results on their original digest', async () => {
+    const {parent, frame, sent} = frameWindows();
+    const dispose = serveTestFrame({window: frame as never, origin: ORIGIN, getVm: fakeVm});
+    const first = [{extensionId: 'typedclamp', sha256: 'a'.repeat(64)}];
+    const second = [{extensionId: 'typedclamp', sha256: 'b'.repeat(64)}];
+    message(frame, {type: 'twpe-test:run', id: 'old', project: {}, builds: first}, ORIGIN, parent);
+    message(frame, {type: 'twpe-test:run', id: 'new', project: {}, builds: second}, ORIGIN, parent);
+    for (let tries = 0; tries < 50 && sent.filter(entry => entry.data.type === 'twpe-test:done').length < 2; tries++) {
+        await settle();
+    }
+    const results = sent.filter(entry => entry.data.type === 'twpe-test:end').map(({data}) => [data.id, data.result.builds]);
+    const reports = sent.filter(entry => entry.data.type === 'twpe-test:done').map(({data}) => [data.id, data.report.builds]);
+    assert.deepEqual(results, [['old', first], ['new', second]]);
+    assert.deepEqual(reports, results);
+    dispose();
+});
+
+test('captures build attribution before waiting for the frame and rejects malformed or duplicate identities', async () => {
+    const editor = new EventTarget();
+    const posted: any[] = [];
+    const contentWindow = {postMessage: (data: unknown) => posted.push(data)};
+    const port = connectTestFrame({ownerDocument: {defaultView: editor}, contentWindow} as never, {origin: ORIGIN});
+    const builds = [{extensionId: 'typedclamp', sha256: 'a'.repeat(64)}];
+    const project = {name: 'old'};
+    const running = port.run({project, builds});
+    project.name = 'new';
+    builds[0]!.sha256 = 'b'.repeat(64);
+    message(editor, {type: 'twpe-test:ready'}, ORIGIN, contentWindow);
+    await settle();
+    assert.deepEqual(posted[0].builds, [{extensionId: 'typedclamp', sha256: 'a'.repeat(64)}]);
+    assert.deepEqual(posted[0].project, {name: 'old'});
+    message(editor, {type: 'twpe-test:done', id: 'run-1', report: {ok: true}}, ORIGIN, contentWindow);
+    await running;
+    await assert.rejects(port.run({project: {}, builds: [...builds, ...builds]}), /duplicate/);
+    await assert.rejects(port.run({project: {}, builds: [{extensionId: 'typedclamp', sha256: 'wrong'}]}), /Invalid/);
+    assert.equal(posted.length, 1);
+    port.dispose?.();
+});
+
+test('only authoritative VM identities label results after each exact project load', async () => {
+    const {parent, frame, sent} = frameWindows();
+    const vm = fakeVm();
+    let loads = 0;
+    vm.loadProject = async () => {loads++;};
+    vm.toJSON = () => JSON.stringify({targets: [{name: 'Cat', blocks: Object.fromEntries(
+        ['first', 'second'].map(id => [id, {opcode: 'kubohiroyatest_whentest', topLevel: true}])
+    )}]});
+    const digests: number[] = [];
+    const dispose = serveTestFrame({window: frame as never, origin: ORIGIN, getVm: () => vm, getLoadedBuilds: current => {
+        assert.equal(current, vm);
+        digests.push(loads);
+        return [{extensionId: 'typedclamp', sha256: String(loads).repeat(64)}];
+    }});
+    message(frame, {type: 'twpe-test:run', id: 'r', project: {},
+        builds: [{extensionId: 'typedclamp', sha256: 'a'.repeat(64)}]}, ORIGIN, parent);
+    for (let tries = 0; tries < 50 && !sent.some(entry => entry.data.type === 'twpe-test:done'); tries++) await settle();
+    const report = sent.find(({data}) => data.type === 'twpe-test:done')?.data.report;
+    assert.deepEqual(digests, [2, 3], 'not called for discovery, called after each test load');
+    assert.deepEqual(report.results.map(result => result.builds[0].sha256), ['2'.repeat(64), '3'.repeat(64)]);
+    assert.equal(Object.hasOwn(report, 'builds'), false, 'different builds cannot label the run as a whole');
+    dispose();
+});
+
+test('the published popup route still accepts the same-origin opener and rejects another window', async () => {
+    const sent: any[] = [];
+    const opener = {location: {origin: ORIGIN}, postMessage: (data: unknown) => sent.push(data)};
+    const parent = {name: 'tw-plus-test-run', opener, postMessage() {throw new Error('Wrong client');}};
+    const frame = Object.assign(new EventTarget(), {parent});
+    const dispose = serveTestFrame({window: frame as never, origin: ORIGIN, getVm: fakeVm});
+    const run = {type: 'twpe-test:run', id: 'popup', project: {}};
+    message(frame, run, ORIGIN, parent);
+    await settle();
+    assert.deepEqual(sent, [{type: 'twpe-test:ready'}]);
+    message(frame, run, ORIGIN, opener);
+    for (let tries = 0; tries < 50 && !sent.some(data => data.type === 'twpe-test:done'); tries++) await settle();
+    assert.equal(sent.at(-1).report.counts.passed, 1);
+    dispose();
+});

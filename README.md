@@ -51,3 +51,13 @@ Frames are runtime steps, not wall-clock time. A loop with no visual change can 
 ## License
 
 MPL-2.0.
+
+### Build attribution
+
+An integrating host can pass `builds: [{extensionId, sha256}]` to a run, or expose
+`getRunSnapshot()` on the view to capture the project and identities together.
+Supply only artifact digests verified by the loader for that snapshot. The runner
+copies them and attaches them to that run's report and each result. The view
+shows each result's own digests even when a later run uses a different build.
+The identities are not authorization and do not load, update or grant trust to
+an extension.

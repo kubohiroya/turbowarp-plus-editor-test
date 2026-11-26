@@ -4,18 +4,22 @@ import {extension, project} from './fixture.ts';
 
 declare const EditorRuntime: any;
 
-(globalThis as any).setup = async ({locale, frameLimit, archive = false, list = false}:
-    {locale: string; frameLimit: number; archive?: boolean; list?: boolean}) => {
+(globalThis as any).setup = async ({locale, frameLimit, archive = false, list = false, builds = false}:
+    {locale: string; frameLimit: number; archive?: boolean; list?: boolean; builds?: boolean}) => {
     const host = await EditorRuntime.start(document.getElementById('workspace'), {locale: 'en'});
     const vm = host.vm;
     host.registerExtension(extension(EditorRuntime.vmModules.ScratchCommon.Cast, vm.runtime));
     if (vm.runtime.frameLoop?.running) vm.stop();
     const shown: Array<[string, string]> = [];
     const created: HTMLElement[] = [];
+    let digest = 'a'.repeat(64);
     const options = {
         document, locale, frameLimit,
         // An archive stands for the SB3 the editor passes, which the view cannot read; only its listing is tested.
         getProject: () => archive ? new ArrayBuffer(8) : structuredClone(project),
+        ...(builds ? {getRunSnapshot: () => ({project: structuredClone(project), builds: [
+            {extensionId: 'typedclamp', sha256: digest}
+        ]})} : {}),
         ...(list ? {listProject: () => JSON.stringify(project)} : {}),
         createVm: (stage: HTMLElement) => {
             created.push(stage);
@@ -35,6 +39,7 @@ declare const EditorRuntime: any;
     (globalThis as any).harness = {
         view,
         shown,
+        changeDigest: () => {digest = 'b'.repeat(64);},
         vmCreated: () => created.length,
         menuItem: () => {
             const item = testRunMenuItem(locale, () => opened.push('open'));
