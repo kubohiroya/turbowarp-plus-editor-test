@@ -5,6 +5,7 @@
  * So the test VM lives in a frame: `serveTestFrame` runs inside it, and `connectTestFrame` is the editor's side.
  * Both only accept messages from the other's window and the agreed origin.
  */
+import {captureTestBuilds, type TestBuildIdentity} from './protocol.ts';
 import type {DiscoveredTest} from './test-discovery.ts';
 import {runTests, type RunnerVM, type TestResult, type TestRunReport} from './test-runner.ts';
 
@@ -12,6 +13,7 @@ export type Project = ArrayBuffer | string | object;
 
 export interface TestRunRequest {
     project: Project;
+    builds?: readonly TestBuildIdentity[];
     only?: readonly string[];
     frameLimit?: number;
     signal?: AbortSignal;
@@ -32,8 +34,20 @@ export function vmRunner(vm: RunnerVM): TestRunnerPort {
 
 const PREFIX = 'twpe-test:';
 
+// The Editor owns the Test run popup's DOM, but its calls to postMessage still originate in the editor window.
+// Use the same-origin opener as the client only for that popup; an embedded tab uses the immediate parent.
+const editorClient = (owner: Window, origin: string): Window => {
+    if (owner.name !== 'tw-plus-test-run') return owner;
+    try {
+        const opener: Window | null = owner.opener;
+        return opener?.location.origin === origin ? opener : owner;
+    } catch {
+        return owner;
+    }
+};
+
 type ToFrame =
-    | {type: `${typeof PREFIX}run`; id: string; project: Project; only?: string[]; frameLimit?: number; context?: unknown}
+    | {type: `${typeof PREFIX}run`; id: string; project: Project; builds?: readonly TestBuildIdentity[]; only?: string[]; frameLimit?: number; context?: unknown}
     | {type: `${typeof PREFIX}stop`; id: string};
 type FromFrame =
     | {type: `${typeof PREFIX}ready`}
@@ -52,6 +66,8 @@ export interface TestFrameServerOptions {
     origin: string;
     /** The test VM, created on the first run. */
     getVm(): RunnerVM | Promise<RunnerVM>;
+    /** Supplies authoritative evidence from the VM that loaded the test project. */
+    getLoadedBuilds?: Parameters<typeof runTests>[0]['getLoadedBuilds'];
     /**
      * Called before each run with what the editor sent along, such as the extension code it trusts, so that the
      * frame loads only that. A rejection fails the run.
@@ -62,8 +78,8 @@ export interface TestFrameServerOptions {
 /** Inside the frame: runs what the editor asks for, one run at a time, and reports as it goes. */
 export function serveTestFrame(options: TestFrameServerOptions): () => void {
     const {window} = options;
-    const parent = window.parent;
-    const post = (message: FromFrame) => parent.postMessage(message, options.origin);
+    const client = editorClient(window.parent, options.origin);
+    const post = (message: FromFrame) => client.postMessage(message, options.origin);
     const runs = new Map<string, AbortController>();
     let vm: Promise<RunnerVM> | undefined;
     let queue: Promise<unknown> = Promise.resolve();
@@ -75,9 +91,10 @@ export function serveTestFrame(options: TestFrameServerOptions): () => void {
             vm ??= Promise.resolve(options.getVm());
             const testVm = await vm;
             controller.signal.throwIfAborted();
+            const builds = options.getLoadedBuilds ? undefined : captureTestBuilds(message.builds);
             await options.prepare?.(message.context, testVm);
             const report = await runTests({
-                vm: testVm, project: message.project, only: message.only, frameLimit: message.frameLimit,
+                vm: testVm, project: message.project, builds, getLoadedBuilds: options.getLoadedBuilds, only: message.only, frameLimit: message.frameLimit,
                 signal: controller.signal,
                 onTestStart: test => post({type: `${PREFIX}start`, id: message.id, test}),
                 onTestEnd: result => post({type: `${PREFIX}end`, id: message.id, result})
@@ -92,7 +109,7 @@ export function serveTestFrame(options: TestFrameServerOptions): () => void {
     };
 
     const listener = (event: MessageEvent) => {
-        if (event.source !== parent || event.origin !== options.origin || !isMessage(event.data)) return;
+        if (event.source !== client || event.origin !== options.origin || !isMessage(event.data)) return;
         const message = event.data as ToFrame;
         if (message.type === `${PREFIX}stop`) {
             runs.get(message.id)?.abort();
@@ -112,13 +129,13 @@ export function serveTestFrame(options: TestFrameServerOptions): () => void {
 export interface TestFrameClientOptions {
     /** The frame's origin. Messages from anywhere else are ignored. */
     origin: string;
-    /** What to send along with each run, such as the extension code the editor trusts now. */
-    context?(): unknown;
+    /** What accompanies this request, such as the extension code approved for its project snapshot. */
+    context?(request: TestRunRequest): unknown;
 }
 
 /** The editor's side of a frame that runs `serveTestFrame`. */
 export function connectTestFrame(frame: HTMLIFrameElement, options: TestFrameClientOptions): TestRunnerPort {
-    const window = frame.ownerDocument.defaultView!;
+    const window = editorClient(frame.ownerDocument.defaultView!, options.origin);
     let readyResolve!: () => void;
     const ready = new Promise<void>(resolve => {
         readyResolve = resolve;
@@ -151,7 +168,11 @@ export function connectTestFrame(frame: HTMLIFrameElement, options: TestFrameCli
     return {
         async run(request) {
             request.signal?.throwIfAborted();
+            const builds = captureTestBuilds(request.builds);
+            const context = options.context?.(request);
+            const project = builds === undefined ? request.project : structuredClone(request.project);
             await ready;
+            request.signal?.throwIfAborted();
             const id = `run-${++counter}`;
             const target = frame.contentWindow;
             if (!target) throw new Error('The test frame is gone.');
@@ -161,10 +182,11 @@ export function connectTestFrame(frame: HTMLIFrameElement, options: TestFrameCli
                     target.postMessage({type: `${PREFIX}stop`, id} satisfies ToFrame, options.origin);
                 }, {once: true});
                 target.postMessage({
-                    type: `${PREFIX}run`, id, project: request.project,
+                    type: `${PREFIX}run`, id, project,
+                    ...(builds === undefined ? {} : {builds}),
                     ...(request.only ? {only: [...request.only]} : {}),
                     ...(request.frameLimit === undefined ? {} : {frameLimit: request.frameLimit}),
-                    ...(options.context ? {context: options.context()} : {})
+                    ...(context === undefined ? {} : {context})
                 } satisfies ToFrame, options.origin);
             });
         },

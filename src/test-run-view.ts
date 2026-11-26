@@ -4,7 +4,7 @@
  * host creates for it, never on the editor's, and shows each failed check with a way to find its block. It is plain
  * DOM so that it can live in a workspace tab, a window or a test page alike.
  */
-import type {AssertionRecord} from './protocol.ts';
+import {captureTestBuilds, type AssertionRecord, type TestBuildIdentity} from './protocol.ts';
 import {discoverTests, type DiscoveredTest} from './test-discovery.ts';
 import {DEFAULT_FRAME_LIMIT, type RunnerVM, type TestResult, type TestStatus} from './test-runner.ts';
 import {vmRunner, type Project, type TestRunnerPort} from './test-frame.ts';
@@ -17,6 +17,9 @@ export interface TestRunViewOptions {
      * tests before they run: `editorVm.toJSON(undefined, {allowOptimization: false})` keeps the editor's block IDs.
      */
     getProject(): Project | Promise<Project>;
+    /** Optional atomic capture of the project and the host-attested build identities for that run. */
+    getRunSnapshot?(): {project: Project; builds: readonly TestBuildIdentity[]} |
+        Promise<{project: Project; builds: readonly TestBuildIdentity[]}>;
     /**
      * The project's `project.json`, as text or an object, to list the tests from when `getProject` returns an SB3
      * archive, which the view cannot read. Read when the view opens or refreshes and when a run starts. It must carry
@@ -74,6 +77,7 @@ const texts = {
             'timed-out': (_: DiscoveredTest, limit: number) => `テストが ${limit} フレームで終わりませんでした。`,
             exception: (_: DiscoveredTest, __: number, message: string) => `ブロックがエラーを出しました: ${message}`
         },
+        builds: 'テスト対象のビルド',
         expected: '期待',
         actual: '実際',
         tolerance: '誤差',
@@ -112,6 +116,7 @@ const texts = {
             'timed-out': (_: DiscoveredTest, limit: number) => `The test did not end within ${limit} frames.`,
             exception: (_: DiscoveredTest, __: number, message: string) => `A block threw an error: ${message}`
         },
+        builds: 'Tested builds',
         expected: 'Expected',
         actual: 'Actual',
         tolerance: 'Tolerance',
@@ -254,6 +259,16 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
             run.addEventListener('click', () => void view.run(test.address));
             row.append(mark, name, meta, run);
             item.append(row);
+            if (result?.builds?.length) {
+                const buildList = make('ul', 'twpe-test-run__checks');
+                buildList.setAttribute('aria-label', text.builds);
+                for (const {extensionId, sha256} of result.builds) {
+                    const build = make('li', 'twpe-test-run__check');
+                    build.append(make('span', undefined, extensionId), make('code', undefined, sha256));
+                    buildList.append(build);
+                }
+                item.append(buildList);
+            }
             const failed = result?.assertions.filter(record => !record.passed) ?? [];
             if (failed.length) {
                 const checks = make('ul', 'twpe-test-run__checks');
@@ -299,9 +314,6 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
 
     const start = async (only?: string[]) => {
         if (controller || disposed) return;
-        const project = await options.getProject();
-        const known = listFrom(options.listProject ? await options.listProject() : project);
-        if (!known && tests.length === 0) setSummary(text.cannotList);
         controller = new AbortController();
         const signal = controller.signal;
         if (only) for (const address of only) results.delete(address);
@@ -309,13 +321,20 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         render();
         setSummary(text.running);
         try {
+            const snapshot = options.getRunSnapshot ? await options.getRunSnapshot() : undefined;
+            const builds = captureTestBuilds(snapshot?.builds);
+            const project = snapshot ? snapshot.project : await options.getProject();
+            const listing = options.listProject ? await options.listProject() : project;
+            signal.throwIfAborted();
+            const known = listFrom(listing);
+            if (!known && tests.length === 0) setSummary(text.cannotList);
             runner ??= (async () => {
                 if (options.createRunner) return options.createRunner(stage);
                 if (options.createVm) return vmRunner(await options.createVm(stage));
                 throw new Error('The test run view needs createRunner or createVm.');
             })();
             await (await runner).run({
-                project, only, frameLimit: options.frameLimit, signal,
+                project, builds, only, frameLimit: options.frameLimit, signal,
                 onTestStart: test => {
                     listed = true;
                     if (!tests.some(known => known.address === test.address)) tests.push(test);

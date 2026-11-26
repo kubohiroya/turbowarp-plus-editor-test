@@ -32,3 +32,24 @@ export interface AssertionRecord {
     tolerance?: number;
     message?: string;
 }
+
+/** Digest of the executable artifact selected by the host for one extension in the test snapshot. */
+export interface TestBuildIdentity {
+    extensionId: string;
+    sha256: string;
+}
+
+/** Copy the host's attribution before any async work; the same snapshot applies to every result of a run. */
+export function captureTestBuilds(builds: readonly TestBuildIdentity[] | undefined): readonly TestBuildIdentity[] | undefined {
+    if (builds === undefined) return undefined;
+    if (!Array.isArray(builds)) throw new TypeError('Test build identities must be an array.');
+    const ids = new Set<string>();
+    return Object.freeze(builds.map(build => {
+        if (!build || typeof build.extensionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(build.extensionId) ||
+            typeof build.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(build.sha256) || ids.has(build.extensionId)) {
+            throw new TypeError('Invalid or duplicate test build identity.');
+        }
+        ids.add(build.extensionId);
+        return Object.freeze({extensionId: build.extensionId, sha256: build.sha256});
+    }).sort((left, right) => left.extensionId < right.extensionId ? -1 : left.extensionId > right.extensionId ? 1 : 0));
+}
