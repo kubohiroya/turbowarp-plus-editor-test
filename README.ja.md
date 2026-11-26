@@ -62,6 +62,6 @@ MPL-2.0
 この識別情報は、拡張の読み込み・更新や承認を行うものではありません。
 
 
-### テスト実行のEditor/frameホスト（次版のAPI）
+### テスト実行のEditor/frameホスト（0.4.1）
 
 `./editor-host・./frame-host` がVM接続の寿命、ZIPの検査、保存世代と拡張ID/SHAの照合、実行iframe/別窓、失敗ブロックの対象検索、検証済みlegacy Blob URLの破棄を担当します。配布元の値とnativeコールバックを渡して使用します。由来・依存順・切り戻しは [移管記録](EDITOR-MIGRATION.md) を参照してください。
