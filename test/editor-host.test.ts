@@ -4,14 +4,15 @@ import {JSDOM} from 'jsdom';
 import Zip from '@turbowarp/jszip';
 import {createTestRunEditor} from '../dist/editor-host.js';
 const url = 'https://editor.test/sub/editor.html';
-function fixture() {
+function fixture(popup?: JSDOM) {
     const dom = new JSDOM('', {url, pretendToBeVisual: true});
+    if (popup) dom.window.open = () => popup.window as unknown as Window;
     let request;
     const activations: string[]=[];
     const controller=createTestRunEditor({document:()=>dom.window.document, zip:Zip,
         frameURL:view=>new URL('test-frame.html',view.location.href).href,
         identities:()=>[{id:'sample',sha256:'a'.repeat(64),execution:'sandboxed'}],
-        openPanel:(_vm,panel)=>{request=panel; return true;},
+        openPanel:(_vm,panel)=>{request=panel; return !popup;},
         navigation:()=>({activate:target=>{activations.push(target); return true;},centerBlock:block=>{activations.push(block);}})});
     const project={targets:[],extensionURLs:{}};
     const serialized: string[]=[];
@@ -49,6 +50,39 @@ test('connection disposal cannot disconnect a newer VM; the panel snapshot keeps
     view.dispose();
     assert.equal(slot.querySelectorAll('iframe').length,0);active.dispose();
     assert.deepEqual(f.controller.testRunMenuItems('ja'),[]);
+});
+test('an about:blank popup keeps the Editor origin and rejects other senders', async t=>{
+    const popup=new JSDOM('',{url:'about:blank',pretendToBeVisual:true});
+    const f=fixture(popup);
+    popup.window.name='tw-plus-test-run';
+    Object.defineProperty(popup.window,'opener',{value:f.dom.window});
+    t.after(()=>{
+        popup.window.dispatchEvent(new popup.window.Event('pagehide'));
+        popup.window.close();f.dom.window.close();
+    });
+    assert.equal(popup.window.location.origin,'null');
+    const connection=f.controller.connectTestRun(f.vm);
+    t.after(()=>connection.dispose());
+    f.controller.testRunMenuItems('en')[0].onSelect();
+    popup.window.document.querySelector('button')!.click();
+    await new Promise(resolve=>setTimeout(resolve,10));
+    const frame=popup.window.document.querySelector('iframe')!;
+    assert.ok(frame);
+    assert.equal(frame.src,'https://editor.test/sub/test-frame.html');
+    const posted: any[]=[];
+    frame.contentWindow!.postMessage=(message,origin)=>{posted.push({message,origin});};
+    const ready=(source:any,origin:string)=>f.dom.window.dispatchEvent(new f.dom.window.MessageEvent('message',{
+        source,origin,data:{type:'twpe-test:ready'}
+    }));
+    ready(frame.contentWindow!,'https://other.test');
+    ready(popup.window,'https://editor.test');
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert.equal(posted.length,0);
+    ready(frame.contentWindow!,'https://editor.test');
+    await new Promise(resolve=>setTimeout(resolve,0));
+    const sent=posted.find(entry=>entry.message.type==='twpe-test:run');
+    assert.ok(sent,'the real frame handshake must start the run');
+    assert.equal(sent.origin,'https://editor.test');
 });
 test('aborting a saved-generation run removes its hidden iframe and message listener', async t=>{
     const f=fixture();t.after(()=>f.dom.window.close());
