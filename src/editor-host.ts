@@ -96,7 +96,8 @@ export function createTestRunEditor(ports: TestEditorPorts) {
             frame.style.cssText = 'width: 100%; height: 100%; border: 0; display: block;';
             stage.append(frame);
             const runner = connectTestFrame(frame, {
-                origin: doc.defaultView!.location.origin,
+                // The popup's about:blank URL has a null origin; the Editor owns the frame protocol.
+                origin: ports.document().defaultView!.location.origin,
                 context: request => 'extensionContext' in request ? request.extensionContext : undefined
             });
             return {
