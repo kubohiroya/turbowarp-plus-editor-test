@@ -32,6 +32,12 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 
 ホストは、実行を始めるときに編集中の作品の写しを返す `getProject()`、テストを動かすものを作って実行画面を `stage` に置く `createRunner(stage)`、任意で `showBlock(target, blockId)` を渡す。`getProject()` が SB3 のアーカイブを返すときは、画面はそれを読めないので、その `project.json` を返す `listProject()` も渡す。渡せば実行前にテストを一覧にし、渡さなければ最初の実行で動いた順に一覧にする。同じページに使える VM があるホストは、代わりに `createVm(stage)` を渡せる。
 
+### 失敗の印
+
+ホストが任意で `markFailures(marks)` を渡すと、画面は結果が変わるたびに、失敗した確かめるブロックの一覧（`{target, blockId, label}`。`label` は比べ方と期待・実際の値を `locale` の言葉で示す1行）を渡す。実行を始め直したときと画面を閉じたときは空の一覧を渡す。
+
+`createTestRunEditor` はこれを使い、エディターが表示しているスプライト・ステージのコードで、失敗した確かめるブロックの輪郭を赤くし、「!」の印を付け、その上に `label` をツールチップで出す。別のスプライトのコードを表示すると、そのスプライトの失敗に付け直す。印は次の実行で消え、ブロックを編集しても残る。ホストは `navigation(vm).workspace()` で、表示中のコードの Blockly ワークスペース（`getBlockById(id).getSvgRoot()`）を渡す。渡さなければ印は付けない。VM の `editingTarget` と `workspaceUpdate` イベントで、表示中のコードとその切り替えを知る。
+
 ## 別の文書でテストを動かす
 
 拡張ローダーはページ全体の central dispatch を自分の VM のために使うので、1つのページで拡張を読み込める VM は1つだけで、エディターではそれがエディターの VM になる。そこでエディターは、テストを別の文書（iframe）で動かす。枠の中では VM と拡張ホストを作って `serveTestFrame({window, origin, getVm, prepare})` を呼び、エディターは枠を画面の `stage` に置いて、`connectTestFrame(frame, {origin, context})` をランナーとして渡す。実行のたびに作品・選んだテスト・`context()`（エディターが読み込んでいる拡張コードの SHA-256 など）を送り、枠の `prepare(context, vm)` が実行前にそれを適用するので、枠はそのコードだけを動かす。どちらの側も、ほかの窓や origin からのメッセージは無視する。
