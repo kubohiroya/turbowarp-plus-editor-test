@@ -38,7 +38,22 @@ export interface TestRunViewOptions {
     createVm?(stage: HTMLElement): RunnerVM | Promise<RunnerVM>;
     /** Shows a block of the editor's project, such as a check that failed. Without it no link is offered. */
     showBlock?(target: string, blockId: string): void;
+    /**
+     * Receives the checks that failed in the results shown, each with its block in the editor's project and a line
+     * saying why, so the host can mark those blocks. Called again with the new set whenever the results change, and
+     * with an empty list when a run starts over them or the view closes.
+     */
+    markFailures?(marks: readonly FailureMark[]): void;
     frameLimit?: number;
+}
+
+/** A check that failed, to be marked on its block in the editor. */
+export interface FailureMark {
+    /** The sprite or stage, by name as tests address it. */
+    target: string;
+    blockId: string;
+    /** Why the check failed, in the view's language. */
+    label: string;
 }
 
 export interface TestRunView {
@@ -176,6 +191,17 @@ function ensureStyles(document: Document) {
 
 const show = (value: unknown) => JSON.stringify(value) ?? String(value);
 
+/** One line saying why a check failed: what it compared and the values, as the result list shows them. */
+export function failureLabel(locale: string, record: AssertionRecord): string {
+    const text = testRunText(locale);
+    const parts = [text.kind[record.kind] ?? record.kind];
+    if ('expected' in record) parts.push(`${text.expected}: ${show(record.expected)}`);
+    if ('actual' in record) parts.push(`${text.actual}: ${show(record.actual)}`);
+    if (record.tolerance !== undefined) parts.push(`${text.tolerance}: ${record.tolerance}`);
+    if (record.message) parts.push(record.message);
+    return parts.join(' / ');
+}
+
 export function createTestRunView(options: TestRunViewOptions): TestRunView {
     const {document} = options;
     const text = testRunText(options.locale);
@@ -286,6 +312,25 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         stopButton.disabled = controller === null;
     };
 
+    let marked = false;
+    /** Tells the host which check blocks failed in the results shown now, once per block. */
+    const publishMarks = () => {
+        if (!options.markFailures) return;
+        const marks = new Map<string, FailureMark>();
+        for (const result of results.values()) {
+            for (const record of result.assertions) {
+                if (record.passed || !record.blockId) continue;
+                const key = `${result.target}/${record.blockId}`;
+                if (!marks.has(key)) {
+                    marks.set(key, {target: result.target, blockId: record.blockId, label: failureLabel(options.locale, record)});
+                }
+            }
+        }
+        if (!marks.size && !marked) return;
+        marked = marks.size > 0;
+        options.markFailures([...marks.values()]);
+    };
+
     const setSummary = (message: string) => {
         summary.textContent = message;
     };
@@ -309,6 +354,7 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         for (const address of [...results.keys()]) {
             if (!tests.some(test => test.address === address)) results.delete(address);
         }
+        publishMarks();
         return true;
     };
 
@@ -318,6 +364,7 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         const signal = controller.signal;
         if (only) for (const address of only) results.delete(address);
         else results.clear();
+        publishMarks();
         render();
         setSummary(text.running);
         try {
@@ -342,8 +389,10 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
                     render();
                 },
                 onTestEnd: result => {
+                    if (disposed) return;
                     results.set(result.address, result);
                     runningAddress = null;
+                    publishMarks();
                     render();
                 }
             });
@@ -382,6 +431,8 @@ export function createTestRunView(options: TestRunViewOptions): TestRunView {
         dispose() {
             disposed = true;
             controller?.abort();
+            results.clear();
+            publishMarks();
             void runner?.then(port => port.dispose?.(), () => undefined);
             root.remove();
         }

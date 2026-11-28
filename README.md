@@ -32,6 +32,12 @@ The view shows a stage of its own, the project's tests and their results. **Run 
 
 The host passes `getProject()`, which returns a copy of the editor's project when a run starts, `createRunner(stage)`, which creates what runs the tests and puts its stage into `stage`, and optionally `showBlock(target, blockId)`. When `getProject()` returns an SB3 archive, which the view cannot read, pass `listProject()` with its `project.json` too, so that the view lists the tests before they run; otherwise it lists them as the first run starts them. A host that already has a spare VM in the page can pass `createVm(stage)` instead.
 
+### Failure marks
+
+A host can also pass `markFailures(marks)`. Whenever the results change, the view passes the checks that failed as `{target, blockId, label}`, where `label` is one line in the view's language saying how the check compared and the expected and actual values. It passes an empty list when a run starts over the results and when the view closes.
+
+`createTestRunEditor` uses it to mark the failed checks in the code the editor shows: a red outline, a "!" badge, and `label` as the badge's tooltip. When the editor shows another sprite's code, the marks move to that sprite's failures. They stay through edits until the next run. The host passes the Blockly workspace of the code shown through `navigation(vm).workspace()` (`getBlockById(id).getSvgRoot()`); without it no marks are drawn. The VM's `editingTarget` and its `workspaceUpdate` event tell which code is shown and when it changes.
+
 ## Running tests in a frame
 
 A page holds only one VM that can load extensions through the extension loader, because the loader takes over the page's central dispatch for it, and in the editor that is the editor's VM. So the editor runs tests in a frame of their own. The frame creates its VM and extension host and calls `serveTestFrame({window, origin, getVm, prepare})`; the editor puts the frame into the view's stage and passes `connectTestFrame(frame, {origin, context})` as the runner. Each run sends the project, the chosen tests and `context()`, such as the digests of the extension code the editor has loaded, which the frame's `prepare(context, vm)` applies before the run, so that the frame runs only that code. Both sides ignore messages from any other window or origin.
