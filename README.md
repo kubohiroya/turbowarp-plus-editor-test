@@ -42,6 +42,8 @@ A host can also pass `markFailures(marks)`. Whenever the results change, the vie
 
 A page holds only one VM that can load extensions through the extension loader, because the loader takes over the page's central dispatch for it, and in the editor that is the editor's VM. So the editor runs tests in a frame of their own. The frame creates its VM and extension host and calls `serveTestFrame({window, origin, getVm, prepare})`; the editor puts the frame into the view's stage and passes `connectTestFrame(frame, {origin, context})` as the runner. Each run sends the project, the chosen tests and `context()`, such as the digests of the extension code the editor has loaded, which the frame's `prepare(context, vm)` applies before the run, so that the frame runs only that code. Both sides ignore messages from any other window or origin.
 
+The tests run each extension the way the Editor ran it for that project: inside the sandbox if it ran there, and outside only if its person approved that. An extension read from the Plus extension record runs outside only with the same ID and SHA-256 the Editor approved. An extension the project names by URL runs outside only when the Editor actually loaded that URL outside the sandbox (its VM service name starts with `unsandboxed.`) and the project names it; a data: URL is its own bytes, while an https URL is trusted by URL, as the Editor itself does. A saved generation carries none of these approvals.
+
 ## What the host provides
 
 - A VM the runner drives alone, with its frame loop stopped (`vm.start()` not called). Not the editor's VM.

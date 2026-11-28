@@ -42,6 +42,8 @@ TurboWarp Plus Editor の作品の中に [TurboWarp-Test](https://github.com/kub
 
 拡張ローダーはページ全体の central dispatch を自分の VM のために使うので、1つのページで拡張を読み込める VM は1つだけで、エディターではそれがエディターの VM になる。そこでエディターは、テストを別の文書（iframe）で動かす。枠の中では VM と拡張ホストを作って `serveTestFrame({window, origin, getVm, prepare})` を呼び、エディターは枠を画面の `stage` に置いて、`connectTestFrame(frame, {origin, context})` をランナーとして渡す。実行のたびに作品・選んだテスト・`context()`（エディターが読み込んでいる拡張コードの SHA-256 など）を送り、枠の `prepare(context, vm)` が実行前にそれを適用するので、枠はそのコードだけを動かす。どちらの側も、ほかの窓や origin からのメッセージは無視する。
 
+テストで動かす拡張は、Editor がその作品で動かしたものと同じ扱いにする。サンドボックスの内で動いたものは内で、利用者が承認してサンドボックスの外で動いたものだけを外で動かす。Plus の拡張の記録から読む拡張は、Editor が承認したのと同じ ID・同じ SHA-256 のときに限る。作品が URL で参照する拡張は、Editor が実際にサンドボックスの外で読んだ URL（VM のサービス名が `unsandboxed.` で始まるもの）のうち、作品が名指すものに限る。data URL は URL そのものが中身なので同じバイト列になる。https の URL は、Editor 自身と同じく URL で信頼する。保存した世代のテストには、この承認を持ち込まない。
+
 ## ホストが用意するもの
 
 - ランナーだけが動かす VM。フレームループは止めておく（`vm.start()` を呼ばない）。編集中の VM は使わない。
