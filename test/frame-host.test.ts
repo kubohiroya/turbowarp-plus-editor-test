@@ -70,3 +70,41 @@ test('disposal during verification cannot leave a late executable Blob URL', asy
     policy.dispose();finish(new Response('code'));
     await assert.rejects(preparing,/cancelled/);
 });
+
+test('a live run takes outside the sandbox only the URLs and digests the Editor ran there', async () => {
+    const legacy = 'data:text/javascript;base64,YXBwcm92ZWQ=';
+    const gallery = 'https://extensions.test/approved.js';
+    const policy = createTestFramePolicy({catalogURL, catalog});
+    const manager = {canLoadExtensionFromProject: async () => false, getSandboxMode: async () => 'iframe', rewriteExtensionURL: async url => url};
+    policy.configureSecurityManager(manager);
+    await policy.prepare({extensionURLs: [legacy, gallery, 'data:text/javascript,sandboxed'],
+        unsandboxedExtensionURLs: [legacy, gallery, 'https://not-in-the-project.test/x.js'],
+        unsandboxedExtensions: [{id: 'sample', sha256: digest}]});
+    assert.equal(await manager.getSandboxMode(legacy), 'unsandboxed');
+    assert.equal(await manager.getSandboxMode(gallery), 'unsandboxed');
+    assert.equal(await manager.getSandboxMode('data:text/javascript,sandboxed'), 'iframe');
+    // A URL the project does not name is not loaded at all, so it cannot be approved either.
+    assert.equal(await manager.getSandboxMode('https://not-in-the-project.test/x.js'), 'iframe');
+    assert.equal(await policy.canLoadCode(code({execution: 'unsandboxed'})), true);
+    assert.equal(await policy.requestApproval(code({execution: 'unsandboxed'})), true);
+    // Only the exact digest the Editor committed, and only for the same extension.
+    assert.equal(await policy.canLoadCode(code({execution: 'unsandboxed', actualSHA256: 'b'.repeat(64)})), false);
+    assert.equal(await policy.canLoadCode(code({execution: 'unsandboxed', id: 'other'})), false);
+    // The approval to run outside the sandbox does not let the same code in sandboxed under another approval.
+    assert.equal(await policy.canLoadCode(code()), false);
+    // The next run starts from what that run sends.
+    await policy.prepare({extensionURLs: [legacy]});
+    assert.equal(await manager.getSandboxMode(legacy), 'iframe');
+    assert.equal(await policy.canLoadCode(code({execution: 'unsandboxed'})), false);
+});
+
+test('a saved generation carries no approval to run outside the sandbox', async () => {
+    const legacy = 'data:text/javascript;base64,YXBwcm92ZWQ=';
+    const policy = createTestFramePolicy({catalogURL, catalog});
+    const manager = {canLoadExtensionFromProject: async () => false, getSandboxMode: async () => 'iframe', rewriteExtensionURL: async url => url};
+    policy.configureSecurityManager(manager);
+    await policy.prepare({savedGeneration: true, extensionURLs: [legacy], unsandboxedExtensionURLs: [legacy],
+        unsandboxedExtensions: [{id: 'sample', sha256: digest}]});
+    assert.equal(await manager.getSandboxMode(legacy), 'iframe');
+    assert.equal(await policy.canLoadCode(code({execution: 'unsandboxed'})), false);
+});

@@ -23,16 +23,21 @@ export interface TestSecurityManager {
 
 export function createTestFramePolicy(options: TestFramePolicyOptions) {
     const urls = options.urls ?? URL;
-    let context: {extensionURLs: string[]; sandboxedExtensions: {id: string; sha256: string}[]; savedGeneration: boolean} = {
-        extensionURLs: [], sandboxedExtensions: [], savedGeneration: false
+    type Identity = {id: string; sha256: string};
+    let context: {extensionURLs: string[]; unsandboxedExtensionURLs: string[]; sandboxedExtensions: Identity[];
+        unsandboxedExtensions: Identity[]; savedGeneration: boolean} = {
+        extensionURLs: [], unsandboxedExtensionURLs: [], sandboxedExtensions: [], unsandboxedExtensions: [], savedGeneration: false
     };
     let disposed = false;
     let generation = 0;
     let legacyTest: {url: string; verifiedUrl: string} | undefined;
     const isEmbedded = (code: TestFrameCode) => code.execution === 'sandboxed' &&
         ['embedded-file', 'embedded-data'].includes(code.source.type) && code.sha256 === code.actualSHA256;
-    const isApproved = (code: TestFrameCode) => isEmbedded(code) && context.sandboxedExtensions.some(entry =>
+    const listed = (entries: Identity[], code: TestFrameCode) => entries.some(entry =>
         entry.id === code.id && entry.sha256 === code.actualSHA256);
+    // The Editor ran this exact code: sandboxed as it did, or outside the sandbox where its person approved that.
+    const isApproved = (code: TestFrameCode) => (isEmbedded(code) && listed(context.sandboxedExtensions, code)) ||
+        (code.execution === 'unsandboxed' && code.sha256 === code.actualSHA256 && listed(context.unsandboxedExtensions, code));
     const releaseLegacy = () => {
         if (legacyTest) urls.revokeObjectURL(legacyTest.verifiedUrl);
         legacyTest = undefined;
@@ -50,7 +55,9 @@ export function createTestFramePolicy(options: TestFramePolicyOptions) {
         },
         configureSecurityManager(manager: TestSecurityManager) {
             manager.canLoadExtensionFromProject = async url => context.extensionURLs.includes(url);
-            manager.getSandboxMode = async url => legacyTest?.url === url ? 'unsandboxed' : 'iframe';
+            // Outside the sandbox only what the Editor ran there for this project: a data: URL is its own bytes.
+            manager.getSandboxMode = async url => legacyTest?.url === url ||
+                (!context.savedGeneration && context.unsandboxedExtensionURLs.includes(url)) ? 'unsandboxed' : 'iframe';
             const rewrite = manager.rewriteExtensionURL.bind(manager);
             manager.rewriteExtensionURL = url => legacyTest?.url === url ? Promise.resolve(legacyTest.verifiedUrl) : rewrite(url);
         },
@@ -58,13 +65,21 @@ export function createTestFramePolicy(options: TestFramePolicyOptions) {
             if (disposed) throw new Error('Test frame disposed');
             const preparing = ++generation;
             releaseLegacy();
-            const data = input as {extensionURLs?: unknown; sandboxedExtensions?: unknown; savedGeneration?: unknown; testExtensionURL?: unknown} | undefined;
+            const data = input as {extensionURLs?: unknown; unsandboxedExtensionURLs?: unknown; sandboxedExtensions?: unknown;
+                unsandboxedExtensions?: unknown; savedGeneration?: unknown; testExtensionURL?: unknown} | undefined;
+            const strings = (value: unknown) => Array.isArray(value) ? value.filter((url): url is string => typeof url === 'string') : [];
+            const identities = (value: unknown) => Array.isArray(value) ? value.filter(
+                (entry): entry is Identity => typeof entry?.id === 'string' &&
+                    typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256)) : [];
+            const extensionURLs = strings(data?.extensionURLs);
+            const savedGeneration = data?.savedGeneration === true;
             context = {
-                extensionURLs: Array.isArray(data?.extensionURLs) ? data.extensionURLs.filter((url): url is string => typeof url === 'string') : [],
-                savedGeneration: data?.savedGeneration === true,
-                sandboxedExtensions: Array.isArray(data?.sandboxedExtensions) ? data.sandboxedExtensions.filter(
-                    (entry): entry is {id: string; sha256: string} => typeof entry?.id === 'string' &&
-                        typeof entry.sha256 === 'string' && /^[0-9a-f]{64}$/.test(entry.sha256)) : []
+                extensionURLs,
+                savedGeneration,
+                // A saved generation has no live approval to carry over.
+                unsandboxedExtensionURLs: savedGeneration ? [] : strings(data?.unsandboxedExtensionURLs).filter(url => extensionURLs.includes(url)),
+                sandboxedExtensions: identities(data?.sandboxedExtensions),
+                unsandboxedExtensions: savedGeneration ? [] : identities(data?.unsandboxedExtensions)
             };
             const source = data?.testExtensionURL;
             if (!context.savedGeneration || source === undefined) return;
