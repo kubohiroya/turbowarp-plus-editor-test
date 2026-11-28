@@ -1,6 +1,6 @@
 {
   "name": "@kubohiroya/turbowarp-plus-editor-test",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Runs the tests written inside a TurboWarp Plus Editor project, each from a fresh copy of the project, and collects the results",
   "type": "module",
   "license": "MPL-2.0",
