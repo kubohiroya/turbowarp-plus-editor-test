@@ -11,7 +11,7 @@ function fixture(popup?: JSDOM) {
     const activations: string[]=[];
     const controller=createTestRunEditor({document:()=>dom.window.document, zip:Zip,
         frameURL:view=>new URL('test-frame.html',view.location.href).href,
-        identities:()=>[{id:'sample',sha256:'a'.repeat(64),execution:'sandboxed'}],
+        identities:()=>[{id:'sample',sha256:'a'.repeat(64),execution:'sandboxed'},{id:'native',sha256:'c'.repeat(64),execution:'unsandboxed'}],
         openPanel:(_vm,panel)=>{request=panel; return !popup;},
         navigation:()=>({activate:target=>{activations.push(target); return true;},centerBlock:block=>{activations.push(block);}})});
     const project={targets:[],extensionURLs:{}};
@@ -19,7 +19,10 @@ function fixture(popup?: JSDOM) {
     const vm={runtime:{targets:[{id:'clone',isOriginal:false,getName:()=> 'Cat'},{id:'cat',isOriginal:true,getName:()=> 'Cat'}]},
         toJSON:(_target,options)=>{assert.equal(options.allowOptimization,false); return JSON.stringify(project);},
         _saveProjectZip:()=>({file(name,data){assert.equal(name,'project.json');serialized.push(data);},generateAsync:async()=>new ArrayBuffer(1)}),
-        extensionManager:{getExtensionURLs:()=>({sample:'https://extensions.test/sample.js'})},setEditingTarget:assert.fail};
+        extensionManager:{getExtensionURLs:()=>({sample:'https://extensions.test/sample.js',legacy:'data:text/javascript,legacy'}),
+            // The sample runs in a worker; the legacy URL was approved to run outside the sandbox.
+            _loadedExtensions:new Map([['sample','extension.1.sample'],['legacy','unsandboxed.2.legacy'],['pen','pen']])},
+        setEditingTarget:assert.fail};
     return {dom,vm,controller,serialized,activations,panel:()=>request};
 }
 test('connection disposal cannot disconnect a newer VM; the panel snapshot keeps raw IDs and committed identities', async t=>{
@@ -44,8 +47,9 @@ test('connection disposal cannot disconnect a newer VM; the panel snapshot keeps
     await new Promise(resolve=>setTimeout(resolve,0));
     const sent=posted.find(entry=>entry.message.type==='twpe-test:run');
     assert.equal(sent.origin,'https://editor.test');
-    assert.deepEqual(sent.message.context,{extensionURLs:['https://extensions.test/sample.js'],
-        sandboxedExtensions:[{id:'sample',sha256:'a'.repeat(64)}]});
+    assert.deepEqual(sent.message.context,{extensionURLs:['https://extensions.test/sample.js','data:text/javascript,legacy'],
+        unsandboxedExtensionURLs:['data:text/javascript,legacy'],
+        sandboxedExtensions:[{id:'sample',sha256:'a'.repeat(64)}],unsandboxedExtensions:[{id:'native',sha256:'c'.repeat(64)}]});
     assert.equal(sent.message.project.byteLength,1);
     view.dispose();
     assert.equal(slot.querySelectorAll('iframe').length,0);active.dispose();

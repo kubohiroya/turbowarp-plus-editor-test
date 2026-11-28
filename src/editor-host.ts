@@ -8,7 +8,11 @@ export type TestEditorVM = {
     runtime: {targets: Array<{id: string; isOriginal: boolean; getName(): string}>};
     toJSON(targetId?: string, options?: {allowOptimization?: boolean}): string;
     _saveProjectZip(): {file(name: string, data: string): unknown; generateAsync(options: {type: 'arraybuffer'}): Promise<ArrayBuffer>};
-    extensionManager: {getExtensionURLs?(): Record<string, string>};
+    extensionManager: {
+        getExtensionURLs?(): Record<string, string>;
+        /** Each loaded extension's service: `unsandboxed.<worker>.<id>` for one running outside the sandbox. */
+        _loadedExtensions?: Map<string, string>;
+    };
     setEditingTarget(targetId: string): void;
     /** The sprite or stage whose code the editor shows. Failure marks are drawn on its blocks. */
     editingTarget?: {id: string} | null;
@@ -179,12 +183,22 @@ export function createTestRunEditor(ports: TestEditorPorts) {
         }
     };
 
-    const contextFor = (vm: TestEditorVM) => ({
-        extensionURLs: Object.values(vm.extensionManager.getExtensionURLs?.() ?? {}),
-        sandboxedExtensions: getExtensionIdentities(vm)
-            .filter(extension => extension.execution === 'sandboxed')
-            .map(({id, sha256}) => ({id, sha256}))
-    });
+    const contextFor = (vm: TestEditorVM) => {
+        const urls = vm.extensionManager.getExtensionURLs?.() ?? {};
+        const identities = getExtensionIdentities(vm);
+        const committed = (execution: string) => identities
+            .filter(extension => extension.execution === execution)
+            .map(({id, sha256}) => ({id, sha256}));
+        return {
+            extensionURLs: Object.values(urls),
+            // The project URLs the Editor runs outside the sandbox, as its person approved them.
+            unsandboxedExtensionURLs: [...vm.extensionManager._loadedExtensions ?? []]
+                .filter(([id, service]) => typeof service === 'string' && service.startsWith('unsandboxed.') && typeof urls[id] === 'string')
+                .map(([id]) => urls[id]),
+            sandboxedExtensions: committed('sandboxed'),
+            unsandboxedExtensions: committed('unsandboxed')
+        };
+    };
 
     type TestProjectSnapshot = {archive: ArrayBuffer; extensionContext: ReturnType<typeof contextFor>};
 
